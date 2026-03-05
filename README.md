@@ -23,9 +23,8 @@ copies to free up disk space — on both your Mac and (after sync) your iPhone.
 ## Requirements
 
 - macOS 12 Monterey or later (tested on 13 Ventura / 14 Sonoma)
-- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) — handles Python and dependencies automatically
 - Terminal app must have **Full Disk Access** (see below)
-- `rich` Python library (`pip install rich`)
 
 ### Full Disk Access
 
@@ -38,17 +37,23 @@ Messages database access requires Full Disk Access for your terminal:
 ## Installation
 
 ```bash
+# Install uv (if you don't have it)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 git clone <this-repo>
 cd attachment-cleaner
-pip install rich          # only dependency
 ```
+
+No further setup needed — `uv` downloads Python and installs dependencies on
+first run.
 
 ## Usage
 
 ### 1. Scan and show a summary (safe — read-only)
 
 ```bash
-python main.py
+./main.py
+# or: uv run main.py
 ```
 
 Scans all media attachments ≥ 100 KB and prints a table of the top 20
@@ -57,7 +62,7 @@ reclaimable files along with their Photos matches.
 ### 2. Interactive review (recommended first run)
 
 ```bash
-python main.py --review
+./main.py --review
 ```
 
 Steps through each matched attachment from largest to smallest.  For each one,
@@ -70,13 +75,13 @@ Delete this attachment file? [y/n/q]:
 ### 3. Preview auto-clean without deleting
 
 ```bash
-python main.py --auto --dry-run
+./main.py --auto --dry-run
 ```
 
 ### 4. Auto-delete (hash-verified matches only — safest)
 
 ```bash
-python main.py --auto --verify-hash --confirmed-only
+./main.py --auto --verify-hash --confirmed-only
 ```
 
 Exports each candidate Photos asset, computes SHA-256, and only deletes the
@@ -85,7 +90,7 @@ attachment if the hashes match exactly.  Slower but zero false positives.
 ### 5. Auto-delete all timestamp-matched files
 
 ```bash
-python main.py --auto
+./main.py --auto
 ```
 
 Uses timestamp proximity (±10 seconds) to match.  Fast but may rarely

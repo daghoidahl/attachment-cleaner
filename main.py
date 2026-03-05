@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["rich>=13.0"]
+# ///
 """
 Messages Attachment Cleaner
 ===========================
