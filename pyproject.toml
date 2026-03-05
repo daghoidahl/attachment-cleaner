@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "attachment-cleaner"
+version = "0.1.0"
+description = "Free up disk space by removing Messages attachments already in Photos"
+requires-python = ">=3.10"
+dependencies = [
+    "rich>=13.0",
+]
+
+[project.scripts]
+attachment-cleaner = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["attachment_cleaner*"]
