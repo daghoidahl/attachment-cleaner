@@ -138,7 +138,7 @@ def _fetch_assets_sql(start: datetime, end: datetime) -> list[PhotosAsset]:
     Table: ZASSET
     Relevant columns:
       ZUUID, ZFILENAME, ZDATECREATED (Mac absolute time, float),
-      ZMEDIATYPE (1=image, 2=video), ZFAVORITE (0/1),
+      ZKIND (0=image, 1=video), ZFAVORITE (0/1),
       ZWIDTH, ZHEIGHT
     """
     import sqlite3
@@ -164,7 +164,7 @@ def _fetch_assets_sql(start: datetime, end: datetime) -> list[PhotosAsset]:
             ZUUID,
             ZFILENAME,
             ZDATECREATED,
-            ZMEDIATYPE,
+            ZKIND,
             ZFAVORITE,
             ZWIDTH,
             ZHEIGHT
@@ -184,7 +184,7 @@ def _fetch_assets_sql(start: datetime, end: datetime) -> list[PhotosAsset]:
                     creation_date=dt,
                     width=row["ZWIDTH"] or 0,
                     height=row["ZHEIGHT"] or 0,
-                    media_type=row["ZMEDIATYPE"] or 1,
+                    media_type=(row["ZKIND"] or 0) + 1,  # ZKIND: 0=image,1=video → remap to 1=image,2=video
                     favorite=bool(row["ZFAVORITE"]),
                 )
             )
