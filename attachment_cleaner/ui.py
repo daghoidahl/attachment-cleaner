@@ -12,7 +12,7 @@ Provides three main interactions:
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rich.columns import Columns
@@ -31,7 +31,13 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 
-from .cleaner import AttachmentCleaner, CleanupPlan, MatchResult
+from .cleaner import (
+    AttachmentCleaner,
+    CleanupPlan,
+    MatchResult,
+    load_cached_plan,
+    save_cached_plan,
+)
 from .messages_db import Attachment, MessagesDB
 from .photos_bridge import PhotosAsset
 
@@ -70,6 +76,20 @@ def fmt_size(n_bytes: int) -> str:
 
 def fmt_date(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _fmt_age(delta: timedelta) -> str:
+    secs = int(delta.total_seconds())
+    if secs < 60:
+        return "just now"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins} minute{'s' if mins != 1 else ''} ago"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = hours // 24
+    return f"{days} day{'s' if days != 1 else ''} ago"
 
 
 def _attachment_row_text(att: Attachment, include_size: bool = True) -> Text:
@@ -116,11 +136,11 @@ def print_summary(plan: CleanupPlan) -> None:
     if plan.matched:
         table = Table(title="Top reclaimable attachments", show_lines=False, expand=False)
         table.add_column("#", style="dim", width=4)
-        table.add_column("Attachment", no_wrap=True)
+        table.add_column("Size", justify="right", style="bold green")
+        table.add_column("Contact", style="cyan", no_wrap=True)
         table.add_column("Date", style="dim")
-        table.add_column("Size", justify="right", style="green")
         table.add_column("Match", style="yellow")
-        table.add_column("Photos filename")
+        table.add_column("Photos")
 
         sorted_matches = sorted(
             plan.matched, key=lambda r: r.attachment.total_bytes, reverse=True
@@ -128,18 +148,20 @@ def print_summary(plan: CleanupPlan) -> None:
 
         for i, result in enumerate(sorted_matches, 1):
             att = result.attachment
-            photos_name = (
-                result.photos_assets[0].filename if result.photos_assets else "?"
-            )
+            asset = result.photos_assets[0] if result.photos_assets else None
+            if asset:
+                photos_cell = f"[link=photos://asset?id={asset.local_id}]{asset.filename}[/link]"
+            else:
+                photos_cell = "?"
             match_label = "hash ✓" if result.is_confirmed else "timestamp ~"
-            name = att.transfer_name or Path(att.filename).name if att.filename else "?"
+            contact = att.chat_identifier or "Unknown"
             table.add_row(
                 str(i),
-                name,
-                fmt_date(att.created_date),
                 fmt_size(att.total_bytes),
+                contact,
+                fmt_date(att.created_date),
                 match_label,
-                photos_name,
+                photos_cell,
             )
         console.print(table)
     console.print()
@@ -178,13 +200,9 @@ def interactive_review(
 
     for idx, result in enumerate(sorted_matches):
         att = result.attachment
-        name = att.transfer_name or Path(att.filename).name if att.filename else "?"
 
-        console.rule(f"[{idx+1}/{total}]  {name}")
-        console.print(_attachment_row_text(att))
-        console.print(
-            f"  Path: [dim]{att.filename or 'N/A'}[/dim]"
-        )
+        console.rule(f"[{idx+1}/{total}]  {fmt_size(att.total_bytes)}  {fmt_date(att.created_date)}")
+        console.print(f"  Contact: [cyan]{att.chat_identifier or 'Unknown'}[/cyan]")
         console.print(
             f"  Match method: [yellow]{'hash ✓' if result.is_confirmed else 'timestamp ~'}[/yellow]"
         )
@@ -192,11 +210,18 @@ def interactive_review(
         if result.photos_assets:
             console.print("  Photos matches:")
             for asset in result.photos_assets:
-                console.print(f"    • {_photos_asset_text(asset)}")
+                link = f"[link=photos://asset?id={asset.local_id}]{asset.filename}[/link]"
+                t = Text.from_markup(f"    • {link}")
+                t.append(f"  {fmt_date(asset.creation_date)}", style="dim")
+                if asset.is_video:
+                    t.append("  [VIDEO]", style="magenta")
+                if asset.favorite:
+                    t.append("  ★", style="red")
+                console.print(t)
 
         console.print()
         choice = Prompt.ask(
-            "  Delete this attachment file?",
+            "  Delete this attachment?",
             choices=["y", "n", "q"],
             default="n",
         )
@@ -210,12 +235,23 @@ def interactive_review(
                 deleted_count += 1
                 deleted_bytes += att.total_bytes
             else:
-                if cleaner.delete_attachment_file(att):
-                    console.print(f"  [green]Deleted.[/green] Freed {fmt_size(att.total_bytes)}.")
+                success, method = cleaner.delete_attachment(att)
+                if success and method == "message":
+                    console.print(
+                        f"  [green]Deleted from Messages[/green] — will sync to iPhone. "
+                        f"Freed {fmt_size(att.total_bytes)}."
+                    )
+                    deleted_count += 1
+                    deleted_bytes += att.total_bytes
+                elif success and method == "file":
+                    console.print(
+                        f"  [green]Deleted file[/green] — [yellow]local only, won't sync[/yellow]. "
+                        f"Freed {fmt_size(att.total_bytes)}."
+                    )
                     deleted_count += 1
                     deleted_bytes += att.total_bytes
                 else:
-                    console.print("  [red]Delete failed.[/red] File may already be gone.")
+                    console.print("  [red]Delete failed.[/red]")
         else:
             console.print("  [dim]Skipped.[/dim]")
 
@@ -261,7 +297,8 @@ def auto_clean(
                 progress.advance(task)
                 continue
             att = result.attachment
-            if cleaner.delete_attachment_file(att):
+            success, _ = cleaner.delete_attachment(att)
+            if success:
                 deleted_count += 1
                 deleted_bytes += att.total_bytes
             progress.advance(task)
@@ -282,6 +319,7 @@ def run_scan(
     media_only: bool,
     timestamp_tolerance: int,
     verify_hash: bool,
+    refresh: bool = False,
 ) -> tuple[CleanupPlan, AttachmentCleaner]:
     """Run the scan with a live progress bar and return the plan."""
     cleaner = AttachmentCleaner(
@@ -290,6 +328,12 @@ def run_scan(
         timestamp_tolerance=timestamp_tolerance,
         verify_hash=verify_hash,
     )
+    scan_params = {
+        "min_bytes": min_bytes,
+        "media_only": media_only,
+        "tolerance": timestamp_tolerance,
+        "verify_hash": verify_hash,
+    }
 
     with MessagesDB() as db:
         total_att = db.attachment_count()
@@ -298,6 +342,20 @@ def run_scan(
             f"Messages DB: [bold]{total_att}[/bold] total attachments, "
             f"[bold]{fmt_size(total_size)}[/bold] on disk.\n"
         )
+
+        db_mtime = db.db_mtime()
+
+        if not refresh:
+            cached = load_cached_plan(db_mtime, scan_params)
+            if cached is not None:
+                plan, cached_at_iso = cached
+                cached_dt = datetime.fromisoformat(cached_at_iso)
+                age = datetime.now(tz=cached_dt.tzinfo) - cached_dt
+                console.print(
+                    f"[dim]Loaded cached results from {_fmt_age(age)}. "
+                    f"Use --refresh to re-scan.[/dim]\n"
+                )
+                return plan, cleaner
 
         with make_progress() as progress:
             task = progress.add_task("Scanning attachments…", total=None)
@@ -310,4 +368,5 @@ def run_scan(
             cleaner.progress_cb = update_progress
             plan = cleaner.scan(db)
 
+    save_cached_plan(plan, db_mtime, scan_params)
     return plan, cleaner

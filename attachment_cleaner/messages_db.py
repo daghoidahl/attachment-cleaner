@@ -40,6 +40,8 @@ class Attachment:
     total_bytes: int
     created_date: datetime
     transfer_name: str | None  # original filename
+    chat_identifier: str | None = None   # phone/email of the conversation partner
+    message_guid: str | None = None      # for message deletion
 
     @property
     def resolved_path(self) -> Path | None:
@@ -125,6 +127,10 @@ class MessagesDB:
     def __exit__(self, *_):
         self.close()
 
+    def db_mtime(self) -> float:
+        """Return the modification time of the Messages database file."""
+        return CHAT_DB.stat().st_mtime
+
     def iter_attachments(
         self,
         min_bytes: int = 0,
@@ -138,9 +144,16 @@ class MessagesDB:
                 a.mime_type,
                 a.total_bytes,
                 a.created_date,
-                a.transfer_name
+                a.transfer_name,
+                MIN(c.chat_identifier) AS chat_identifier,
+                MIN(m.guid)            AS message_guid
             FROM attachment a
+            LEFT JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
+            LEFT JOIN message m ON m.ROWID = maj.message_id
+            LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+            LEFT JOIN chat c ON c.ROWID = cmj.chat_id
             WHERE a.total_bytes >= ?
+            GROUP BY a.ROWID
             ORDER BY a.total_bytes DESC
         """
         cursor = self._conn.execute(query, (min_bytes,))
@@ -152,6 +165,8 @@ class MessagesDB:
                 total_bytes=row["total_bytes"] or 0,
                 created_date=mac_time_to_datetime(row["created_date"] or 0),
                 transfer_name=row["transfer_name"],
+                chat_identifier=row["chat_identifier"],
+                message_guid=row["message_guid"],
             )
             if media_only and not att.is_media:
                 continue

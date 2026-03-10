@@ -109,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Show what would be deleted without actually deleting",
     )
+    p.add_argument(
+        "--refresh",
+        action="store_true",
+        default=False,
+        help="Ignore cached scan results and re-scan from scratch",
+    )
     return p
 
 
@@ -149,6 +155,7 @@ def main() -> int:
             media_only=not args.no_media_only,
             timestamp_tolerance=args.tolerance,
             verify_hash=args.verify_hash,
+            refresh=args.refresh,
         )
     except FileNotFoundError as exc:
         console.print(f"[red]Error:[/red] {exc}")
