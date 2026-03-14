@@ -36,7 +36,7 @@ CACHE_FILE = CACHE_DIR / "scan_cache.json"
 class MatchResult:
     attachment: Attachment
     photos_assets: list[PhotosAsset]
-    match_method: str  # "hash" | "timestamp" | "none"
+    match_method: str  # "hash" | "filename" | "metadata_timestamp" | "timestamp" | "none"
 
     @property
     def has_match(self) -> bool:
@@ -44,8 +44,8 @@ class MatchResult:
 
     @property
     def is_confirmed(self) -> bool:
-        """True when verified by hash (not just timestamp)."""
-        return self.match_method == "hash"
+        """True when verified by hash or exact filename (not just timestamp)."""
+        return self.match_method in ("hash", "filename")
 
 
 @dataclass
@@ -192,16 +192,13 @@ class AttachmentCleaner:
                 plan.missing_file.append(att)
                 continue
 
-            matches = find_matching_assets(
+            matches, method = find_matching_assets(
                 attachment_path=resolved,
                 attachment_date=att.created_date,
+                transfer_name=att.transfer_name,
                 tolerance_seconds=self.timestamp_tolerance,
                 verify_hash=self.verify_hash,
             )
-
-            method = "none"
-            if matches:
-                method = "hash" if self.verify_hash else "timestamp"
 
             result = MatchResult(
                 attachment=att,
