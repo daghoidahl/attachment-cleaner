@@ -21,6 +21,7 @@ Options
   --tolerance SECS      Timestamp match window in seconds (default: 10)
   --verify-hash         Export each Photos asset and compare SHA-256 (slower,
                         more reliable)
+  --browse              List all attachments with full metadata (no Photos scan)
   --auto                Delete all matched attachments without prompting
   --confirmed-only      With --auto: only delete hash-verified matches
   --dry-run             Show what would be deleted without actually deleting
@@ -29,6 +30,9 @@ Examples
 --------
   # Show a summary of reclaimable space
   python main.py
+
+  # Browse all attachments with metadata to verify manually
+  python main.py --browse
 
   # Interactively decide for each matched attachment
   python main.py --review
@@ -86,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export Photos assets and compare SHA-256 (slower but more reliable)",
     )
     p.add_argument(
+        "--browse",
+        action="store_true",
+        default=False,
+        help="List all attachments with metadata (filename, size, EXIF date, contact) without scanning Photos",
+    )
+    p.add_argument(
         "--review",
         action="store_true",
         default=False,
@@ -125,6 +135,7 @@ def main() -> int:
     # Lazy imports so the help text is fast
     from attachment_cleaner.ui import (
         auto_clean,
+        browse_attachments,
         interactive_review,
         print_summary,
         run_scan,
@@ -137,6 +148,25 @@ def main() -> int:
             border_style="cyan",
         )
     )
+
+    # Browse mode: show raw attachment metadata without touching Photos
+    if args.browse:
+        try:
+            browse_attachments(
+                min_bytes=int(args.min_size * 1_048_576),
+                media_only=not args.no_media_only,
+            )
+        except FileNotFoundError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            return 1
+        except PermissionError:
+            console.print(
+                "[red]Permission denied.[/red]\n"
+                "Messages requires Full Disk Access.\n"
+                "Go to: System Settings → Privacy & Security → Full Disk Access"
+            )
+            return 1
+        return 0
 
     if args.dry_run:
         console.print("[bold yellow]DRY-RUN mode — nothing will be deleted.[/bold yellow]\n")
